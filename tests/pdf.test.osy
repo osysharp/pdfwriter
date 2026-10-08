@@ -1,0 +1,72 @@
+namespace PdfWriterKitTests;
+
+using Osysharp.PdfWriter;
+
+// A PDF is only right if a reader can find its objects: the tests check the file's structure — header, the byte
+// offsets the cross-reference table promises, the trailer — not merely that bytes came back.
+
+string Latin1(byte[] bytes) {
+  var s = "";
+  var hex = Crypto.ToHex(bytes);
+  var digits = "0123456789abcdef";
+  for (var i = 0; i < hex.Length; i = i + 2) {
+    var h = hex.Substring(i, 2).ToLower();
+    s = s + (char)(digits.IndexOf(h.Substring(0, 1)) * 16 + digits.IndexOf(h.Substring(1, 1)));
+  }
+  return s;
+}
+
+[Test]
+void a_page_of_text_is_a_well_formed_pdf() {
+  var doc = new PdfDocument { Title = "Receipt KT-1040" };
+  doc.Text(50, 780, "Receipt", 20, true);
+  doc.Text(50, 750, "1 × Loafer (38)");
+  doc.TextRight(545, 750, "€120");
+  doc.Line(50, 740, 545, 740);
+  var file = Latin1(doc.ToBytes());
+
+  Assert.StartsWith("%PDF-1.4", file);
+  Assert.True(file.EndsWith("%%EOF\n"));
+  Assert.Contains("/BaseFont /Helvetica-Bold", file);
+  Assert.Contains("(Receipt) Tj", file);
+  Assert.Contains("(Receipt KT-1040)", file);
+  // `startxref` names the byte where `xref` begins, and the first object sits where the table says it does.
+  var xrefAt = Convert.ToInt32(file.Substring(file.LastIndexOf("startxref\n") + 10).Split("\n")[0]);
+  Assert.Equal(xrefAt, file.IndexOf("xref\n"));
+  var firstOffset = Convert.ToInt32(file.Substring(file.IndexOf("65535 f \n") + 9, 10));
+  Assert.Equal(firstOffset, file.IndexOf("1 0 obj"));
+}
+
+[Test]
+void the_euro_sign_and_a_dash_are_written_in_winansi() {
+  var doc = new PdfDocument();
+  doc.Text(50, 700, "€9 – Göteborg");
+  var file = Latin1(doc.ToBytes());
+  Assert.Contains("(" + (char)128 + "9 " + (char)150 + " G" + (char)246 + "teborg) Tj", file);
+}
+
+[Test]
+void parentheses_in_text_are_escaped() {
+  var doc = new PdfDocument();
+  doc.Text(50, 700, "Loafer (38)");
+  Assert.Contains("(Loafer \\(38\\)) Tj", Latin1(doc.ToBytes()));
+}
+
+[Test]
+void text_measures_and_wraps_by_helvetica_widths() {
+  var doc = new PdfDocument();
+  // 3 × 556 + 278 = 1946 thousandths → 19.46 points at 10pt
+  Assert.Equal(19.46, Math.Round(doc.Width("0.00", 10), 2));
+  var lines = doc.Wrap("one two three four five six", 60, 11);
+  Assert.True(lines.Count > 1);
+  Assert.Equal("one two three four five six", string.Join(" ", lines));
+}
+
+[Test]
+void two_pages_are_two_pages() {
+  var doc = new PdfDocument();
+  doc.Text(50, 700, "first");
+  doc.NewPage();
+  doc.Text(50, 700, "second");
+  Assert.Contains("/Count 2", Latin1(doc.ToBytes()));
+}

@@ -1,0 +1,169 @@
+namespace Osysharp.PdfWriter;
+
+/// A PDF being written: pages of text and rules, in points (1/72 inch) from the BOTTOM-left corner of an A4 page,
+/// as PDF counts them. `ToBytes()` answers the finished file.
+public class PdfDocument {
+  /// A4, in points. Set both before the first page for another size (US Letter: 612 × 792).
+  public double PageWidth = 595.28;
+  public double PageHeight = 841.89;
+  /// The document's title, as a reader shows it in its window.
+  public string Title = "";
+
+  List<string> pages = [];
+  string current = "";
+  bool started = false;
+
+  /// Starts a new page. The first `Text` or `Line` starts one on its own.
+  public void NewPage() {
+    if (started) { pages.Add(current); }
+    current = "";
+    started = true;
+  }
+
+  /// Writes `text` with its left end at `x` and its baseline at `y`.
+  public void Text(double x, double y, string text, double size = 11, bool bold = false) {
+    if (!started) { NewPage(); }
+    current = current + $"BT /{(bold ? "F2" : "F1")} {Num(size)} Tf {Num(x)} {Num(y)} Td ({Escaped(text)}) Tj ET\n";
+  }
+
+  /// Writes `text` with its RIGHT end at `x` — the way a column of amounts lines up.
+  public void TextRight(double x, double y, string text, double size = 11, bool bold = false) {
+    Text(x - Width(text, size, bold), y, text, size, bold);
+  }
+
+  /// A straight rule from (x1, y1) to (x2, y2), `width` points thick, in grey `shade` (0 black … 1 white).
+  public void Line(double x1, double y1, double x2, double y2, double width = 0.5, double shade = 0) {
+    if (!started) { NewPage(); }
+    current = current + $"{Num(shade)} G {Num(width)} w {Num(x1)} {Num(y1)} m {Num(x2)} {Num(y2)} l S\n";
+  }
+
+  /// How wide `text` is at `size`, in points — from Helvetica's own character widths.
+  public double Width(string text, double size = 11, bool bold = false) {
+    var units = 0;
+    foreach (var c in text.ToCharArray()) { units = units + GlyphWidth((int)c, bold); }
+    return units * size / 1000.0;
+  }
+
+  /// Splits `text` into lines no wider than `width` at `size`, breaking between words.
+  public List<string> Wrap(string text, double width, double size = 11, bool bold = false) {
+    var lines = new List<string>();
+    var line = "";
+    foreach (var word in text.Split(" ")) {
+      var next = line == "" ? word : line + " " + word;
+      if (line != "" && Width(next, size, bold) > width) { lines.Add(line); line = word; }
+      else { line = next; }
+    }
+    if (line != "") { lines.Add(line); }
+    return lines;
+  }
+
+  /// The finished file.
+  public byte[] ToBytes() {
+    if (!started) { NewPage(); }
+    var all = new List<string>();
+    foreach (var p in pages) { all.Add(p); }
+    all.Add(current);
+
+    // Objects: 1 catalog · 2 page tree · 3 Helvetica · 4 Helvetica-Bold · 5 info · then a page and its content each.
+    var objects = new List<string>();
+    var kids = new List<string>();
+    for (var i = 0; i < all.Count; i++) { kids.Add($"{6 + i * 2} 0 R"); }
+    objects.Add("<< /Type /Catalog /Pages 2 0 R >>");
+    objects.Add($"<< /Type /Pages /Count {all.Count} /Kids [{string.Join(" ", kids)}] >>");
+    objects.Add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+    objects.Add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+    objects.Add($"<< /Title ({Encoded(Escaped(Title))}) /Producer (Osysharp.PdfWriter) >>");
+    for (var i = 0; i < all.Count; i++) {
+      var content = Encoded(all[i]);
+      objects.Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {Num(PageWidth)} {Num(PageHeight)}] "
+        + $"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents {7 + i * 2} 0 R >>");
+      objects.Add($"<< /Length {content.Length} >>\nstream\n{content}\nendstream");
+    }
+
+    // Every character below is one byte (Encoded), so a string length IS a byte offset.
+    var file = "%PDF-1.4\n";
+    var offsets = new List<int>();
+    for (var i = 0; i < objects.Count; i++) {
+      offsets.Add(file.Length);
+      file = file + $"{i + 1} 0 obj\n{objects[i]}\nendobj\n";
+    }
+    var xref = file.Length;
+    file = file + $"xref\n0 {objects.Count + 1}\n0000000000 65535 f \n";
+    foreach (var o in offsets) { file = file + o.ToString().PadStart(10, "0") + " 00000 n \n"; }
+    file = file + $"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R /Info 5 0 R >>\nstartxref\n{xref}\n%%EOF\n";
+    return Crypto.FromHex(Hex(file));
+  }
+
+  // ── what the file is made of ────────────────────────────────────────────────────────────────────────────────
+
+  /// A PDF string's contents with its three special characters escaped. Still text: it is put in WinAnsi ONCE, when
+  /// the file is assembled — encoding here as well turned an already-encoded euro (128) into "?".
+  string Escaped(string text) {
+    return text.Replace("\\", "\\\\").Replace("(", "\\(").Replace(")", "\\)");
+  }
+
+  /// Text as WinAnsi: Latin-1 as itself, the euro sign and typographic punctuation to their WinAnsi codes, and
+  /// anything else as "?". Every character of the answer is one byte.
+  string Encoded(string text) {
+    var s = "";
+    foreach (var c in text.ToCharArray()) {
+      var n = (int)c;
+      if (n < 128 || (n >= 160 && n <= 255)) { s = s + c; }
+      else { s = s + (char)WinAnsi(n); }
+    }
+    return s;
+  }
+
+  int WinAnsi(int n) {
+    if (n == 8364) { return 128; }   // €
+    if (n == 8218) { return 130; }   // ‚
+    if (n == 8222) { return 132; }   // „
+    if (n == 8230) { return 133; }   // …
+    if (n == 8216) { return 145; }   // ‘
+    if (n == 8217) { return 146; }   // ’
+    if (n == 8220) { return 147; }   // “
+    if (n == 8221) { return 148; }   // ”
+    if (n == 8226) { return 149; }   // •
+    if (n == 8211) { return 150; }   // –
+    if (n == 8212) { return 151; }   // —
+    if (n == 8482) { return 153; }   // ™
+    return 63;                       // ?
+  }
+
+  string Hex(string bytes) {
+    var h = "";
+    foreach (var c in bytes.ToCharArray()) { h = h + ((int)c).ToString("X2"); }
+    return h;
+  }
+
+  /// A number as PDF writes one: at most two decimals, a point, no exponent.
+  string Num(double v) {
+    // Written by hand rather than through a culture-aware format: a PDF number is always a point decimal.
+    var r = Math.Round(v, 2);
+    var whole = (long)Math.Floor(Math.Abs(r));
+    var cents = (int)Math.Round((Math.Abs(r) - whole) * 100);
+    var s = (r < 0 ? "-" : "") + whole.ToString();
+    if (cents == 0) { return s; }
+    var frac = cents.ToString().PadStart(2, "0");
+    if (frac.EndsWith("0")) { frac = frac.Substring(0, 1); }
+    return s + "." + frac;
+  }
+
+  /// Helvetica's advance widths, in thousandths of the size, for printable ASCII (32–126). Outside it: the width of
+  /// the nearest ASCII letter for accented Latin-1, 556 for everything else — close enough to right-align.
+  int GlyphWidth(int n, bool bold) {
+    int[] regular = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,
+                     556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,
+                     778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,
+                     222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+    int[] heavy = [278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,
+                   556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,
+                   778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,333,556,611,556,611,556,333,611,611,278,
+                   278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584];
+    if (n >= 32 && n <= 126) { return bold ? heavy[n - 32] : regular[n - 32]; }
+    if (n >= 192 && n <= 222) { return bold ? 722 : 667; }   // À…Þ, capitals
+    if (n >= 223 && n <= 255) { return bold ? 611 : 556; }   // ß…ÿ, small letters
+    if (n == 8212) { return 1000; }
+    return 556;
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "platform": {
+    "version": "0.9.0"
+  },
+  "entries": [
+    {
+      "name": "Osysharp.PdfWriter",
+      "kind": "package",
+      "version": "0.1.0",
+      "hash": "sha256:f1779051eb1bc07dbef8065778361473de5162d865a55299dce76d02ec2be865",
+      "minPlatform": "0.9.0",
+      "shadow": "app-forkable",
+      "source": "workspace:kits/pdfwriter",
+      "constraint": "0"
+    }
+  ]
+}

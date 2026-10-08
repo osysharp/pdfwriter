@@ -1,0 +1,6 @@
+// The producer's test project for Osysharp.PdfWriter — it reads the working tree through `osy.workspace`.
+app PdfWriterKitTests {
+  model "model/**/*.osy";
+  tests "**/*.test.osy";
+  use Osysharp.PdfWriter@0;
+}

@@ -1,0 +1,16 @@
+// Osysharp.PdfWriter — write a PDF from Osy#: text in the standard Helvetica faces, rules, pages. A receipt, an
+// invoice, a packing slip, a certificate — a document you build line by line and hand someone as a file.
+//
+// ⭐ NO FONT IS EMBEDDED, AND NONE NEEDS TO BE: Helvetica and Helvetica-Bold are two of the fourteen faces every PDF
+//    reader carries, so a document is a few kilobytes and opens anywhere. The price is the character set — WinAnsi,
+//    which covers every Western European language (å ä ö é ü ß ø …), the euro sign and typographic punctuation. A
+//    character outside it is written as "?" rather than dropped silently.
+//
+// It is ordinary Osy# over strings and `Crypto.FromHex` — nothing privileged, and no C# anywhere.
+package Osysharp.PdfWriter {
+  version     "0.1.0";
+  minPlatform "0.9.0";
+  summary     "write a PDF — text in Helvetica, rules and pages — for receipts, invoices and slips.";
+  model "model/*.osy";
+  tests "tests";
+}
