@@ -8,8 +8,8 @@
 //
 // It is ordinary Osy# over strings and `Crypto.FromHex` — nothing privileged, and no C# anywhere.
 package Osysharp.PdfWriter {
-  version     "0.1.0";
-  minPlatform "0.9.0";
+  version     "0.2.0";
+  minPlatform "0.14.0";
   summary     "write a PDF — text in Helvetica, rules and pages — for receipts, invoices and slips.";
   model "model/*.osy";
   tests "tests";
